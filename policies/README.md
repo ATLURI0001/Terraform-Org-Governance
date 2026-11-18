@@ -1,0 +1,161 @@
+# Policies reference library
+
+Catalog of reusable organization-level policy files. Attach them through the matching input variable in your tfvars.
+
+| Policy type             | Input variable        | Files live in          |
+| ----------------------- | --------------------- | ---------------------- |
+| Service control policy  | `scp_policies`        | `policies/scp/`        |
+| Resource control policy | `rcp_policies`        | `policies/rcp/`        |
+| Tag policy              | `tagging_policies`    | `policies/tag-policy/` |
+| Backup policy           | `backup_policies`     | `policies/backup/`     |
+| AI services opt-out     | `ai_opt_out_policies` | `policies/ai-opt-out/` |
+| Chat applications policy | `chatbot_policies`   | `policies/chatbot/`    |
+
+## Service control policies (SCPs)
+
+Restrict what IAM principals in your organization's member accounts can do. Deny-only.
+
+| File                                         | Purpose                                                                            | Template Vars                        |
+| -------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------ |
+| `scp/scp-foundation-guardrails.json.tpl`     | Deny organization leave, IMDSv2 required, EBS/RDS encryption, block external RAM sharing    | `breakglass_role`                    |
+| `scp/scp-deny-root-user.json.tpl`            | Deny all root user actions; deny creating root access keys                         | —                                    |
+| `scp/scp-deny-iam-user-creation.json.tpl`    | Require federated access through AWS IAM Identity Center; block creating IAM users, passwords, and access keys                        | `breakglass_role`                    |
+| `scp/scp-require-imdsv2.json.tpl`            | Deny launching EC2 without IMDSv2, enforce hop limit ≤ 2                           | `breakglass_role`                    |
+| `scp/scp-s3-encryption-ssl.json`             | Require SSE on PUT, require SSL, block disabling account-level public access block | —                                    |
+| `scp/scp-require-tags-on-create.json.tpl`    | Require Environment/Team/CostCenter tags on EC2, RDS, S3, EBS                      | —                                    |
+| `scp/scp-region-restriction.json.tpl`        | Deny API calls outside allowed Regions (global services exempted)               | `allowed_regions`, `breakglass_role` |
+| `scp/scp-protect-security-services.json.tpl` | Prevent disabling AWS CloudTrail, Amazon GuardDuty, AWS Config, and AWS Security Hub CSPM                       | `breakglass_role`                    |
+| `scp/scp-deny-expensive-services.json`       | Block expensive services (Amazon Redshift, Amazon EMR, Amazon SageMaker AI) and large instance families    | —                                    |
+
+## Resource control policies (RCPs)
+
+Restrict what can be done _to resources in your accounts_, even by external principals and AWS services. Complements SCPs.
+
+| File                                                  | Purpose                                                                                       | Template Vars |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------- |
+| `rcp/rcp-require-ssl.json`                            | Deny non-SSL access to S3, SQS, Secrets Manager — applies even for cross-account access       | —             |
+| `rcp/rcp-enforce-confused-deputy-protection.json.tpl` | Block access from outside your organization ID; require `aws:SourceAccount` when services assume roles | —             |
+
+> **Note:** RCPs require `RESOURCE_CONTROL_POLICY` to be enabled on your organization root. The sample code does not manage this — run:
+>
+> ```bash
+> aws organizations enable-policy-type --root-id r-xxxx --policy-type RESOURCE_CONTROL_POLICY
+> ```
+
+## Tag policies
+
+Enforce tag key casing and allowed values. Tag policies do not block actions — pair with `scp-require-tags-on-create` to enforce presence.
+
+| File                                             | Purpose                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------- |
+| `tag-policy/tag-policy-mandatory.json`           | Enforce allowed values for Environment, Team, CostCenter, ManagedBy |
+| `tag-policy/tag-policy-recommended.json`         | Enforce key casing for Name, Owner, Description                     |
+| `tag-policy/tag-policy-data-classification.json` | Enforce DataClassification on S3/RDS/DynamoDB/Secrets               |
+| `tag-policy/tag-policy-cost-allocation.json`     | Project, Application, Environment, BusinessUnit for cost reporting  |
+
+## Backup policies
+
+Organization-wide AWS Backup plans attached to OUs. Every account in the target OU inherits the plan.
+
+| File                                                  | Purpose                                                                                      | Template Vars                                                |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `backup/backup-policy-daily-35day.json.tpl`           | Daily backups, 35-day retention, triggered by `Backup=true` tag                              | `primary_region`, `vault_name`                               |
+| `backup/backup-policy-critical-daily-weekly.json.tpl` | Daily + weekly backups with cross-Region copy for DR, triggered by `BackupTier=critical` tag | `primary_region`, `dr_region`, `vault_name`, `dr_vault_name` |
+
+> **Note:** Backup policies reference `$$account` literally — this is the AWS-recognized token that gets substituted per account. Do not change.
+>
+> Requires `BACKUP_POLICY` to be enabled on your organization root:
+>
+> ```bash
+> aws organizations enable-policy-type --root-id r-xxxx --policy-type BACKUP_POLICY
+> ```
+
+## AI services opt-out policies
+
+Control whether AWS can use your content (images, audio, text) to improve AI and ML services. Essential for GDPR, HIPAA, and privacy-sensitive organizations.
+
+| File                                   | Purpose                                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `ai-opt-out/ai-opt-out-all.json`       | Opt out of all AWS AI services globally                                                     |
+| `ai-opt-out/ai-opt-out-selective.json` | Opt out of specific services (Amazon Rekognition, Amazon Comprehend, Amazon Transcribe, and others), opt into the rest |
+
+> Requires `AISERVICES_OPT_OUT_POLICY` to be enabled on your organization root:
+>
+> ```bash
+> aws organizations enable-policy-type --root-id r-xxxx --policy-type AISERVICES_OPT_OUT_POLICY
+> ```
+
+## Chat applications policies
+
+Restrict which Slack workspaces and Microsoft Teams teams can interact with AWS through Amazon Q Developer in chat applications. Prevents unauthorized ChatOps.
+
+| File                                                       | Purpose                                                    | Template Vars                           |
+| ---------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------- |
+| `chatbot/chatbot-restrict-to-approved-workspaces.json.tpl` | Only allow specific Slack workspace IDs and Teams team IDs | `slack_workspace_ids`, `teams_team_ids` |
+
+> Requires `CHATBOT_POLICY` to be enabled on your organization root:
+>
+> ```bash
+> aws organizations enable-policy-type --root-id r-xxxx --policy-type CHATBOT_POLICY
+> ```
+
+## Using a templated policy (`.tpl`)
+
+Pass template variables through `vars`:
+
+```hcl
+scp_policies = {
+  "scp-region-restriction" = {
+    description = "Limit to approved Regions"
+    path        = "policies/scp/scp-region-restriction.json.tpl"
+    vars = {
+      allowed_regions = "\"us-east-1\",\"us-west-2\",\"eu-west-1\""
+      breakglass_role = "BreakGlass-Admin"
+    }
+    targets = ["workloads"]
+  }
+}
+```
+
+## Using a plain JSON policy
+
+No `vars` needed:
+
+```hcl
+rcp_policies = {
+  "rcp-require-ssl" = {
+    description = "Require SSL for S3, SQS, Secrets Manager"
+    path        = "policies/rcp/rcp-require-ssl.json"
+    vars        = {}
+    targets     = ["workloads"]
+  }
+}
+```
+
+## Break-glass role pattern
+
+Most templated policies exclude a `breakglass_role` so you can recover if the policy locks you out.
+
+- Create the role in every account by using an AWS CloudFormation StackSet from the management account
+- Protect the role name with an IAM policy so it can't be renamed or deleted by workloads
+- Restrict assumption to the management account + MFA required
+- Monitor all assumptions through AWS CloudTrail alerts
+
+## Authoring tips
+
+- **Stay under the per-type limit after rendering**: 10,240 characters for an SCP and 5,120 for an RCP. The sample code enforces this as a plan-time precondition.
+- **Always test in a sandbox OU first.** Policies apply immediately to all accounts.
+- **Use `NotAction` sparingly** — over-denying is the most common cause of lockout.
+- **Use IAM Access Analyzer policy validation** on rendered JSON before committing.
+- **Attach `breakglass_role` exclusions** on any deny policy you might need to disable in an emergency.
+- **Version policies by using Git** — the effective policy is the rendered one, not the template. Commit both to make drift detection possible.
+
+## References
+
+- [SCP examples](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps_examples.html)
+- [RCP examples](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_rcps_examples.html)
+- [Tag policy syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_tag-policies-syntax.html)
+- [Backup policy syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_backup_syntax.html)
+- [AI opt-out policy syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_ai-opt-out_syntax.html)
+- [Chat applications policy syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_chatbot_syntax.html)
+- [Policy size and limits](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_reference_limits.html)
